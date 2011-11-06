@@ -26,7 +26,7 @@ Ignore _ + * and several consecutive uppercase."
 
 (rutils:eval-always
   (cl:defpackage :mongrel2
-    (:use :common-lisp :rutils.usr)))
+    (:use :common-lisp #:rutil)))
 
 (in-package :mongrel2)
 
@@ -128,21 +128,20 @@ Ignore _ + * and several consecutive uppercase."
                ,@body)))))))
 
 (defun parse-request (msg)
-  (bind (((sender-uuid connection-id path &rest rest) (split-sequence #\Space
-                                                                      msg))
-         (raw-headers rest (parse-netstring (reduce #'strcat_ rest)))
-         (headers (let ((json:*json-identifier-name-to-lisp*
-                         #'json:simplified-camel-case-to-lisp))
-                    (flatten (json:decode-json-from-string raw-headers))))
-         (body (parse-netstring rest)))
-    (make-instance 'request
-                   :sender-uuid sender-uuid
-                   :connection-id (parse-integer connection-id)
-                   :path path
-                   :headers headers
-                   :body body
-                   :data (when (string= (getf headers :method) "JSON")
-                           (flatten (json:decode-json-from-string body))))))
+  (ds-bind (sender-uuid connection-id path &rest rest)
+      (split-sequence #\Space msg)
+    (mv-bind (raw-headers rest) (parse-netstring (reduce #'strcat_ rest))
+      (let* ((json:*json-identifier-name-to-lisp* #'json:simplified-camel-case-to-lisp)
+             (headers (flatten (json:decode-json-from-string raw-headers)))
+             (body (parse-netstring rest)))
+        (make-instance 'request
+                       :sender-uuid sender-uuid
+                       :connection-id (parse-integer connection-id)
+                       :path path
+                       :headers headers
+                       :body body
+                       :data (when (string= (getf headers :method) "JSON")
+                               (flatten (json:decode-json-from-string body))))))))
 
 (defmethod disconnected? (request)
   (and (string= (getf (request-headers request) :method) "JSON")
@@ -151,7 +150,7 @@ Ignore _ + * and several consecutive uppercase."
 (defun format-http-response (body code status headers)
   (with-output-to-string (resp-stream)
     (fmt-crlf resp-stream "HTTP/1.1 ~A ~A" code status)
-    (fmt-crlf resp-stream "Content-length: ~A" (1+ (length body)))
+    (fmt-crlf resp-stream "Content-length: ~A" (length body))
     (loop :for (k v) :on headers :by #'cddr :do
        (fmt-crlf resp-stream "~:(~A~): ~A" k v))
     (fmt-crlf resp-stream "")
@@ -170,8 +169,7 @@ Ignore _ + * and several consecutive uppercase."
 
 (defmethod deliver ((conn connection) conn-ids msg)
   (fmt-mongrel conn "~A:~{~A~}, ~A"
-               (reduce #'+ (mapcar (lambda (str)
-                                     (length (princ-to-string str)))
+               (reduce #'+ (mapcar #`(length (princ-to-string @))
                                    conn-ids)
                        :initial-value (1- (length conn-ids)))
                (fmt "~A " conn-ids) msg))
